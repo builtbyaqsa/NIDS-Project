@@ -1,0 +1,7 @@
+duration,protocol_type,src_bytes,dst_bytes,label
+0,tcp,181,5450,normal
+0,udp,239,486,normal
+2,tcp,235,1337,anomaly
+0,icmp,181,5450,normal
+0,tcp,0,0,anomaly
+0,tcp,181,5450,normal

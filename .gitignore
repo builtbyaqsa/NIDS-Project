@@ -1,0 +1,14 @@
+# Python environment & cache
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# VS Code & IDE settings
+.vscode/
+.idea/
+
+# Large processed data & models (Git me sirf code jayega)
+data/processed/*.csv
+data/processed/*.pkl
+logs/*.log
