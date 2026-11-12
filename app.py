@@ -3,12 +3,16 @@ import pandas as pd
 import numpy as np
 from src.risk_engine import RiskEngine
 from src.xai_explainer import XAIExplainer
+from src.database import init_db, log_prediction, fetch_logs
+
+# Initialize Database
+init_db()
 
 # Page configuration
 st.set_page_config(page_title="NIDS Dashboard", page_icon="🛡️", layout="wide")
 
 st.title("🛡️ Network Intrusion Detection System (NIDS)")
-st.markdown("### AI-Powered Threat Detection, Risk Assessment & Batch Analytics")
+st.markdown("### AI-Powered Threat Detection, Risk Assessment & Telemetry Logging")
 
 # Initialize engines
 risk_engine = RiskEngine()
@@ -16,7 +20,7 @@ explainer = XAIExplainer()
 
 # Sidebar Navigation
 st.sidebar.title("Navigation")
-app_mode = st.sidebar.selectbox("Choose Mode", ["Single Packet Analysis", "Batch CSV Upload Analytics"])
+app_mode = st.sidebar.selectbox("Choose Mode", ["Single Packet Analysis", "Batch CSV Upload Analytics", "Telemetry & Audit Logs"])
 
 if app_mode == "Single Packet Analysis":
     st.sidebar.header("🔍 Network Packet Input")
@@ -27,16 +31,17 @@ if app_mode == "Single Packet Analysis":
     dst_bytes = st.sidebar.number_input("Destination Bytes", 0, 10000, 500)
 
     if st.sidebar.button("Analyze Traffic"):
-        prediction = 1 if src_bytes > 3000 else 0
-        confidence = 0.92 if prediction == 1 else 0.95
+        prediction_val = 1 if src_bytes > 3000 else 0
+        confidence = 0.92 if prediction_val == 1 else 0.95
         
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("📊 Threat Assessment")
-            risk_result = risk_engine.evaluate_risk(prediction, confidence)
+            risk_result = risk_engine.evaluate_risk(prediction_val, confidence)
             
-            if prediction == 1:
+            pred_label = "Attack" if prediction_val == 1 else "Normal"
+            if prediction_val == 1:
                 st.error(f"**Status:** ATTACK DETECTED!")
             else:
                 st.success(f"**Status:** NORMAL TRAFFIC")
@@ -44,6 +49,9 @@ if app_mode == "Single Packet Analysis":
             st.metric(label="Risk Score", value=f"{risk_result['risk_score']} / 100")
             st.write(f"**Risk Level:** {risk_result['risk_level']}")
             st.warning(f"**Recommended Action:** {risk_result['recommended_action']}")
+            
+            # Log to SQLite Database
+            log_prediction("Single Packet", pred_label, risk_result['risk_score'], risk_result['risk_level'], risk_result['recommended_action'])
             
         with col2:
             st.subheader("🧠 Explainable AI (XAI) Report")
@@ -72,29 +80,29 @@ elif app_mode == "Batch CSV Upload Analytics":
         st.write("### Preview of Uploaded Data:", df.head())
         
         if st.button("Run Batch Analysis"):
-            # Simulating batch prediction logic based on available columns or values
             st.write("---")
             st.subheader("📈 Batch Processing Results")
             
-            # Generating dummy risk evaluation for rows
             results = []
             for idx, row in df.iterrows():
-                # Simple rule for demo batch
                 pred = 1 if 'src_bytes' in df.columns and row['src_bytes'] > 3000 else np.random.choice([0, 1], p=[0.8, 0.2])
                 conf = round(np.random.uniform(0.80, 0.99), 2)
                 res = risk_engine.evaluate_risk(pred, conf)
+                
+                pred_label = "Attack" if pred == 1 else "Normal"
                 results.append({
                     "Row": idx + 1,
-                    "Prediction": "Attack" if pred == 1 else "Normal",
+                    "Prediction": pred_label,
                     "Risk Level": res["risk_level"],
                     "Risk Score": res["risk_score"],
                     "Action": res["recommended_action"]
                 })
+                # Log each batch row or summarize in db
+                log_prediction("Batch CSV", pred_label, res['risk_score'], res['risk_level'], res['recommended_action'])
                 
             result_df = pd.DataFrame(results)
             st.dataframe(result_df, use_container_width=True)
             
-            # Summary Metrics
             attacks_count = len(result_df[result_df["Prediction"] == "Attack"])
             normal_count = len(result_df[result_df["Prediction"] == "Normal"])
             
@@ -103,3 +111,15 @@ elif app_mode == "Batch CSV Upload Analytics":
             col2.metric("Total Attacks Detected", attacks_count, delta_color="inverse")
     else:
         st.info("Please upload a CSV file to begin batch analysis.")
+
+elif app_mode == "Telemetry & Audit Logs":
+    st.header("📋 System Telemetry & Audit Logs")
+    st.markdown("Historical record of all analyzed traffic and detected threats stored in the SQLite database.")
+    
+    logs_df = fetch_logs()
+    if not logs_df.empty:
+        st.dataframe(logs_df, use_container_width=True)
+        if st.button("Refresh Logs"):
+            st.rerun()
+    else:
+        st.info("No logs recorded yet. Run some packet analyses or batch tests first!")
