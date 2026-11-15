@@ -235,3 +235,63 @@ elif app_mode == "Live Threat Simulation":
                 res["risk_score"],
                 res["risk_level"],
                 res["recommended_action"],
+            )
+
+            live_rows.append(
+                {
+                    "Packet #": i,
+                    "src_bytes": int(sample[0][3]),
+                    "Prediction": pred_label,
+                    "Risk Level": res["risk_level"],
+                    "Risk Score": res["risk_score"],
+                }
+            )
+            stream_placeholder.dataframe(pd.DataFrame(live_rows), use_container_width=True)
+            time.sleep(delay_sec)
+
+        st.success(f"Completed {packet_count} simulated packets and logged to SQLite.")
+
+elif app_mode == "Telemetry & Audit Logs":
+    st.header("📋 System Telemetry & Audit Logs")
+    st.markdown("Historical record of all analyzed traffic and detected threats stored in SQLite.")
+
+    logs_df = fetch_logs()
+    if not logs_df.empty:
+        filter_pred = st.selectbox("Filter by Prediction", ["All", "Attack", "Normal"])
+        if filter_pred != "All":
+            logs_df = logs_df[logs_df["prediction"] == filter_pred]
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Displayed Events", len(logs_df))
+        m2.metric("Attacks in View", int((logs_df["prediction"] == "Attack").sum()))
+        m3.metric("Avg Risk Score", round(float(logs_df["risk_score"].mean()), 2))
+
+        st.subheader("Threat Distribution")
+        st.bar_chart(logs_df["prediction"].value_counts())
+
+        st.subheader("Audit Log Table")
+        st.dataframe(logs_df, use_container_width=True)
+
+        c_btn1, c_btn2, c_btn3 = st.columns(3)
+        csv_logs = logs_df.to_csv(index=False).encode("utf-8")
+        c_btn1.download_button(
+            label="⬇️ Export Audit Logs (CSV)",
+            data=csv_logs,
+            file_name="nids_audit_logs.csv",
+            mime="text/csv",
+        )
+        if c_btn2.button("Refresh Logs"):
+            st.rerun()
+        if c_btn3.button("🗑️ Clear All Logs"):
+            clear_logs()
+            st.rerun()
+
+        report_text = build_incident_report(logs_df)
+        st.download_button(
+            label="📄 Download Incident Report (.md)",
+            data=report_text.encode("utf-8"),
+            file_name="nids_incident_report.md",
+            mime="text/markdown",
+        )
+    else:
+        st.info("No logs recorded yet. Run some packet analyses, batch tests, or live simulation!")
