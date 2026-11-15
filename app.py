@@ -62,6 +62,9 @@ app_mode = st.sidebar.selectbox(
 
 if model is not None:
     st.sidebar.success("Model Loaded: tuned_model.pkl")
+    model_type = type(model).__name__
+    n_features = getattr(model, "n_features_in_", "N/A")
+    st.sidebar.caption(f"Estimator: `{model_type}` | Features: `{n_features}`")
 else:
     st.sidebar.warning("Model file not found — using fallback mode")
 
@@ -130,71 +133,74 @@ elif app_mode == "Batch CSV Upload Analytics":
 
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
-        st.success("File uploaded successfully!")
-        st.write("### Preview of Uploaded Data:", df.head())
+        if df.empty:
+            st.error("Uploaded CSV is empty.")
+        else:
+            st.success("File uploaded successfully!")
+            st.write("### Preview of Uploaded Data:", df.head())
 
-        if st.button("Run Batch Analysis"):
-            st.subheader("📈 Batch Processing Results")
-            results = []
-            required_cols = [
-                "duration",
-                "protocol_type",
-                "service",
-                "src_bytes",
-                "dst_bytes",
-            ]
-            has_required = all(col in df.columns for col in required_cols)
+            if st.button("Run Batch Analysis"):
+                st.subheader("📈 Batch Processing Results")
+                results = []
+                required_cols = [
+                    "duration",
+                    "protocol_type",
+                    "service",
+                    "src_bytes",
+                    "dst_bytes",
+                ]
+                has_required = all(col in df.columns for col in required_cols)
 
-            for idx, row in df.iterrows():
-                if has_required:
-                    row_arr = np.array([[row[c] for c in required_cols]], dtype=float)
-                    pred, conf, _ = predict_traffic(model, row_arr)
-                else:
-                    src_val = row["src_bytes"] if "src_bytes" in df.columns else 0
-                    pred = 1 if src_val > 3000 else 0
-                    conf = 0.92 if pred == 1 else 0.95
+                for idx, row in df.iterrows():
+                    if has_required:
+                        row_arr = np.array([[row[c] for c in required_cols]], dtype=float)
+                        pred, conf, _ = predict_traffic(model, row_arr)
+                    else:
+                        src_val = row["src_bytes"] if "src_bytes" in df.columns else 0
+                        pred = 1 if src_val > 3000 else 0
+                        conf = 0.92 if pred == 1 else 0.95
 
-                res = risk_engine.evaluate_risk(pred, conf)
-                pred_label = "Attack" if pred == 1 else "Normal"
+                    res = risk_engine.evaluate_risk(pred, conf)
+                    pred_label = "Attack" if pred == 1 else "Normal"
 
-                results.append(
-                    {
-                        "Row": idx + 1,
-                        "Prediction": pred_label,
-                        "Confidence": conf,
-                        "Risk Level": res["risk_level"],
-                        "Risk Score": res["risk_score"],
-                        "Action": res["recommended_action"],
-                    }
+                    results.append(
+                        {
+                            "Row": idx + 1,
+                            "Prediction": pred_label,
+                            "Confidence": conf,
+                            "Risk Level": res["risk_level"],
+                            "Risk Score": res["risk_score"],
+                            "Action": res["recommended_action"],
+                        }
+                    )
+                    log_prediction(
+                        "Batch CSV",
+                        pred_label,
+                        res["risk_score"],
+                        res["risk_level"],
+                        res["recommended_action"],
+                    )
+
+                result_df = pd.DataFrame(results)
+                st.dataframe(result_df, use_container_width=True)
+
+                attacks_count = int((result_df["Prediction"] == "Attack").sum())
+                normal_count = int((result_df["Prediction"] == "Normal").sum())
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Packets", len(result_df))
+                c2.metric("Normal Traffic", normal_count)
+                c3.metric("Attacks Detected", attacks_count)
+
+                st.bar_chart(result_df["Prediction"].value_counts())
+
+                csv_export = result_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇️ Download Batch Results CSV",
+                    data=csv_export,
+                    file_name="nids_batch_results.csv",
+                    mime="text/csv",
                 )
-                log_prediction(
-                    "Batch CSV",
-                    pred_label,
-                    res["risk_score"],
-                    res["risk_level"],
-                    res["recommended_action"],
-                )
-
-            result_df = pd.DataFrame(results)
-            st.dataframe(result_df, use_container_width=True)
-
-            attacks_count = int((result_df["Prediction"] == "Attack").sum())
-            normal_count = int((result_df["Prediction"] == "Normal").sum())
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Packets", len(result_df))
-            c2.metric("Normal Traffic", normal_count)
-            c3.metric("Attacks Detected", attacks_count)
-
-            st.bar_chart(result_df["Prediction"].value_counts())
-
-            csv_export = result_df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="⬇️ Download Batch Results CSV",
-                data=csv_export,
-                file_name="nids_batch_results.csv",
-                mime="text/csv",
-            )
     else:
         st.info("Please upload a CSV file to begin batch analysis.")
 
