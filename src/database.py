@@ -48,4 +48,11 @@ def pd_read_logs(conn):
     try:
         return pd.read_sql("SELECT * FROM telemetry_logs ORDER BY id DESC", conn)
     except Exception:
-        return pd.DataFrame()
+        return pd.DataFrame() 
+    def clear_logs():
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM telemetry_logs")
+    conn.commit()
+    conn.close()

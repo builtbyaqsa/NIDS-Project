@@ -1,9 +1,10 @@
+import time
 import streamlit as st
 import pandas as pd
 import numpy as np
 from src.risk_engine import RiskEngine
 from src.xai_explainer import XAIExplainer
-from src.database import init_db, log_prediction, fetch_logs
+from src.database import init_db, log_prediction, fetch_logs, clear_logs
 from src.model_loader import load_trained_model, predict_traffic
 
 init_db()
@@ -20,7 +21,12 @@ model = load_trained_model()
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.selectbox(
     "Choose Mode",
-    ["Single Packet Analysis", "Batch CSV Upload Analytics", "Telemetry & Audit Logs"]
+    [
+        "Single Packet Analysis",
+        "Batch CSV Upload Analytics",
+        "Live Threat Simulation",
+        "Telemetry & Audit Logs",
+    ],
 )
 
 if model is not None:
@@ -31,13 +37,15 @@ else:
 if app_mode == "Single Packet Analysis":
     st.sidebar.header("🔍 Network Packet Input")
     duration = st.sidebar.slider("Duration", 0, 100, 10)
-    protocol_type = st.sidebar.selectbox("Protocol Type", [0, 1, 2], format_func=lambda x: ["TCP", "UDP", "ICMP"][x])
+    protocol_type = st.sidebar.selectbox(
+        "Protocol Type", [0, 1, 2], format_func=lambda x: ["TCP", "UDP", "ICMP"][x]
+    )
     service = st.sidebar.slider("Service Type", 0, 10, 2)
     src_bytes = st.sidebar.number_input("Source Bytes", 0, 10000, 1500)
     dst_bytes = st.sidebar.number_input("Destination Bytes", 0, 10000, 500)
 
     if st.sidebar.button("Analyze Traffic"):
-        feature_names = ['duration', 'protocol_type', 'service', 'src_bytes', 'dst_bytes']
+        feature_names = ["duration", "protocol_type", "service", "src_bytes", "dst_bytes"]
         input_vals = [duration, protocol_type, service, src_bytes, dst_bytes]
         feature_array = np.array([input_vals], dtype=float)
 
@@ -62,9 +70,9 @@ if app_mode == "Single Packet Analysis":
             log_prediction(
                 "Single Packet",
                 pred_label,
-                risk_result['risk_score'],
-                risk_result['risk_level'],
-                risk_result['recommended_action']
+                risk_result["risk_score"],
+                risk_result["risk_level"],
+                risk_result["recommended_action"],
             )
 
         with col2:
@@ -73,7 +81,9 @@ if app_mode == "Single Packet Analysis":
             if isinstance(explanation, dict) and "top_risk_factors" in explanation:
                 st.write("Top contributing factors for this decision:")
                 for item in explanation["top_risk_factors"]:
-                    st.info(f"**{item['feature']}** — Importance Score: `{item['importance_score']}`")
+                    st.info(
+                        f"**{item['feature']}** — Importance Score: `{item['importance_score']}`"
+                    )
             else:
                 st.write(explanation)
     else:
@@ -81,7 +91,9 @@ if app_mode == "Single Packet Analysis":
 
 elif app_mode == "Batch CSV Upload Analytics":
     st.header("📁 Batch Network Traffic Analysis")
-    st.markdown("Upload a CSV file containing network connection records to evaluate bulk traffic logs.")
+    st.markdown(
+        "Upload a CSV file containing network connection records to evaluate bulk traffic logs."
+    )
 
     uploaded_file = st.file_uploader("Upload Network Traffic CSV", type=["csv"])
 
@@ -93,7 +105,13 @@ elif app_mode == "Batch CSV Upload Analytics":
         if st.button("Run Batch Analysis"):
             st.subheader("📈 Batch Processing Results")
             results = []
-            required_cols = ['duration', 'protocol_type', 'service', 'src_bytes', 'dst_bytes']
+            required_cols = [
+                "duration",
+                "protocol_type",
+                "service",
+                "src_bytes",
+                "dst_bytes",
+            ]
             has_required = all(col in df.columns for col in required_cols)
 
             for idx, row in df.iterrows():
@@ -101,22 +119,30 @@ elif app_mode == "Batch CSV Upload Analytics":
                     row_arr = np.array([[row[c] for c in required_cols]], dtype=float)
                     pred, conf, _ = predict_traffic(model, row_arr)
                 else:
-                    src_val = row['src_bytes'] if 'src_bytes' in df.columns else 0
+                    src_val = row["src_bytes"] if "src_bytes" in df.columns else 0
                     pred = 1 if src_val > 3000 else 0
                     conf = 0.92 if pred == 1 else 0.95
 
                 res = risk_engine.evaluate_risk(pred, conf)
                 pred_label = "Attack" if pred == 1 else "Normal"
 
-                results.append({
-                    "Row": idx + 1,
-                    "Prediction": pred_label,
-                    "Confidence": conf,
-                    "Risk Level": res["risk_level"],
-                    "Risk Score": res["risk_score"],
-                    "Action": res["recommended_action"]
-                })
-                log_prediction("Batch CSV", pred_label, res['risk_score'], res['risk_level'], res['recommended_action'])
+                results.append(
+                    {
+                        "Row": idx + 1,
+                        "Prediction": pred_label,
+                        "Confidence": conf,
+                        "Risk Level": res["risk_level"],
+                        "Risk Score": res["risk_score"],
+                        "Action": res["recommended_action"],
+                    }
+                )
+                log_prediction(
+                    "Batch CSV",
+                    pred_label,
+                    res["risk_score"],
+                    res["risk_level"],
+                    res["recommended_action"],
+                )
 
             result_df = pd.DataFrame(results)
             st.dataframe(result_df, use_container_width=True)
@@ -136,10 +162,63 @@ elif app_mode == "Batch CSV Upload Analytics":
                 label="⬇️ Download Batch Results CSV",
                 data=csv_export,
                 file_name="nids_batch_results.csv",
-                mime="text/csv"
+                mime="text/csv",
             )
     else:
         st.info("Please upload a CSV file to begin batch analysis.")
+
+elif app_mode == "Live Threat Simulation":
+    st.header("📡 Live SOC Threat Simulation Stream")
+    st.markdown(
+        "Simulate incoming network packets and automatically log high-risk alerts to SQLite."
+    )
+
+    col_a, col_b = st.columns(2)
+    packet_count = col_a.slider("Packets to Simulate", 5, 30, 10)
+    delay_sec = col_b.slider("Interval (seconds)", 0.1, 1.0, 0.3)
+
+    if st.button("Start Live Stream"):
+        stream_placeholder = st.empty()
+        live_rows = []
+
+        for i in range(1, packet_count + 1):
+            sample = np.array(
+                [
+                    [
+                        np.random.randint(0, 80),
+                        np.random.choice([0, 1, 2]),
+                        np.random.randint(0, 10),
+                        np.random.choice([400, 1200, 4500, 7800]),
+                        np.random.choice([200, 900, 3500]),
+                    ]
+                ],
+                dtype=float,
+            )
+            pred, conf, _ = predict_traffic(model, sample)
+            res = risk_engine.evaluate_risk(pred, conf)
+            pred_label = "Attack" if pred == 1 else "Normal"
+
+            log_prediction(
+                "Live Simulation",
+                pred_label,
+                res["risk_score"],
+                res["risk_level"],
+                res["recommended_action"],
+            )
+
+            live_rows.append(
+                {
+                    "Packet #": i,
+                    "src_bytes": int(sample[0][3]),
+                    "Prediction": pred_label,
+                    "Risk Level": res["risk_level"],
+                    "Risk Score": res["risk_score"],
+                }
+            )
+            stream_placeholder.dataframe(pd.DataFrame(live_rows), use_container_width=True)
+            time.sleep(delay_sec)
+
+        st.success(f"Completed {packet_count} simulated packets and logged to SQLite.")
 
 elif app_mode == "Telemetry & Audit Logs":
     st.header("📋 System Telemetry & Audit Logs")
@@ -147,9 +226,13 @@ elif app_mode == "Telemetry & Audit Logs":
 
     logs_df = fetch_logs()
     if not logs_df.empty:
+        filter_pred = st.selectbox("Filter by Prediction", ["All", "Attack", "Normal"])
+        if filter_pred != "All":
+            logs_df = logs_df[logs_df["prediction"] == filter_pred]
+
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Logged Events", len(logs_df))
-        m2.metric("Total Attacks Logged", int((logs_df["prediction"] == "Attack").sum()))
+        m1.metric("Displayed Events", len(logs_df))
+        m2.metric("Attacks in View", int((logs_df["prediction"] == "Attack").sum()))
         m3.metric("Avg Risk Score", round(float(logs_df["risk_score"].mean()), 2))
 
         st.subheader("Threat Distribution")
@@ -158,15 +241,18 @@ elif app_mode == "Telemetry & Audit Logs":
         st.subheader("Audit Log Table")
         st.dataframe(logs_df, use_container_width=True)
 
+        c_btn1, c_btn2, c_btn3 = st.columns(3)
         csv_logs = logs_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
+        c_btn1.download_button(
             label="⬇️ Export Audit Logs (CSV)",
             data=csv_logs,
             file_name="nids_audit_logs.csv",
-            mime="text/csv"
+            mime="text/csv",
         )
-
-        if st.button("Refresh Logs"):
+        if c_btn2.button("Refresh Logs"):
+            st.rerun()
+        if c_btn3.button("🗑️ Clear All Logs"):
+            clear_logs()
             st.rerun()
     else:
-        st.info("No logs recorded yet. Run some packet analyses or batch tests first!")
+        st.info("No logs recorded yet. Run some packet analyses, batch tests, or live simulation!")
